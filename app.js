@@ -1,41 +1,35 @@
 const express = require("express");
 const app = express();
-const PORT = process.env.port || 5000;
-const mongoose = require("mongoose");
+const PORT = Number(process.env.PORT || process.env.port || 5000);
 const cors = require("cors");
-const path = require("path")
+const path = require("path");
+const { pool } = require("./config");
 
 app.use(cors());
+app.use(express.json({ limit: "10mb" }));
 
-require("./config");
-require("./models/model");
-require("./models/post");
-
-app.use(express.json());
 app.use(require("./routes/auth"));
 app.use(require("./routes/createPost"));
 app.use(require("./routes/user"));
 
-mongoose.connection.on("connected", () => {
-  console.log("successfully connected to mongo");
+app.use(express.static(path.join(__dirname, "./frontend/build")));
+app.get("*", (req, resp) => {
+  resp.sendFile(path.join(__dirname, "./frontend/build/index.html"), (err) => {
+    if (err) resp.status(500).send(err.message);
+  });
 });
 
-mongoose.connection.on("error", () => {
-  console.log("not connected to mongo");
-});
+async function start() {
+  try {
+    const connection = await pool.getConnection();
+    await connection.ping();
+    connection.release();
+    console.log("Successfully connected to MySQL");
+    app.listen(PORT, () => console.log("server is running on " + PORT));
+  } catch (err) {
+    console.error("MySQL connection failed:", err.message);
+    process.exit(1);
+  }
+}
 
-// Serving the frontend
-app.use(express.static(path.join(__dirname,"./frontend/build")))
-
-app.get("*",(req,resp)=>{
-  resp.sendFile(
-    path.join(__dirname,"./frontend/build/index.html"),
-    function(err){
-      resp.status(500).send(err)
-    }
-  )
-})
-
-app.listen(PORT, () => {
-  console.log("server is running on " + PORT);
-});
+start();

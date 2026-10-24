@@ -1,24 +1,38 @@
 const jwt = require("jsonwebtoken");
-const { JWT_secret } = require("../config");
-const mongoose = require("mongoose");
-const USER = mongoose.model("USER");
+const { pool, JWT_secret } = require("../config");
 
-module.exports = (req, resp, next) => {
-  const { authorization } = req.headers;
-  if (!authorization) {
-    return resp.status(401).json({ error: "You must have logged in 1" });
+module.exports = async (req, resp, next) => {
+  const authorization = req.headers.authorization;
+  if (!authorization || !authorization.startsWith("Bearer ")) {
+    return resp.status(401).json({ error: "You must have logged in" });
   }
-  const token = authorization.replace("Bearer ", "");
-  jwt.verify(token, JWT_secret, (err, payload) => {
-    if (err) {
-      return resp.status(401).json({ error: "You must have logged in 2" });
+
+  try {
+    const token = authorization.replace(/^Bearer\s+/, "");
+    const payload = jwt.verify(token, JWT_secret);
+    const [rows] = await pool.execute(
+      `SELECT id AS _id, fullName, userName, email, Photo
+       FROM users WHERE id = ? LIMIT 1`,
+      [payload._id]
+    );
+
+    if (!rows.length) {
+      return resp.status(401).json({ error: "User not found" });
     }
-    const { _id } = payload;
-    // Returning details of user
-    USER.findById(_id).then((userData) => {
-      // console.log(userdata)
-      req.user = userData;
-      next();
-    });
-  });
+
+    const user = rows[0];
+    const [following] = await pool.execute(
+      "SELECT followingId FROM follows WHERE followerId = ?",
+      [user._id]
+    );
+    user.following = following.map((row) => row.followingId);
+    req.user = user;
+    next();
+  } catch (err) {
+    if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
+      return resp.status(401).json({ error: "You must have logged in" });
+    }
+    console.error("Authentication error:", err);
+    return resp.status(500).json({ error: "Authentication failed" });
+  }
 };
